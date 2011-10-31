@@ -7,10 +7,12 @@ __license__ = "BSD"
 __maintainer__ = "Razvan Pascanu"
 __email__ = "r.pascanu@gmail"
 
+import time
+from itertools import izip
+
 import numpy
 import theano
 import theano.tensor as TT
-import time
 import linesearch_module as linesearch
 
 from theano.lazycond import ifelse
@@ -40,7 +42,7 @@ def lazy_and(*args):
         if len(args) == 1:
             return args[0]
         else:
-            rval = ifelse(TT.eq(args[0],zero), false, apply_me(args[1:]))
+            rval = ifelse(TT.eq(args[0], zero), false, apply_me(args[1:]))
             return rval
     return apply_me(args)
 
@@ -49,7 +51,7 @@ def my_not(arg):
     return TT.eq(arg, zero)
 
 def ncg(cost_fn, x0s, args=(), gtol=1e-5,
-              maxiter=None, profile = False):
+        maxiter=None, profile=False):
     """Minimize a function using a nonlinear conjugate gradient algorithm.
 
     TODO : add a callback function
@@ -83,6 +85,7 @@ def ncg(cost_fn, x0s, args=(), gtol=1e-5,
     Ribiere. See Wright & Nocedal, 'Numerical Optimization',
     1999, pg. 120-122.
 
+    This function mimics `fmin_cg` from `scipy.optimize`.
     """
     if type(x0s) not in (tuple, list):
         x0s = [x0s]
@@ -95,14 +98,8 @@ def ncg(cost_fn, x0s, args=(), gtol=1e-5,
 
 
     if maxiter is None:
-        len_x0 = 0
-        for x0 in x0s:
-            if x0.ndim > 0:
-                len_x0 += TT.prod(x0.shape)
-            else:
-                len_x0 += one
-
-        maxiter = len_x0*200
+        len_x0 = sum(x0.size for x0 in x0s)
+        maxiter = len_x0 * 200
 
     out = cost_fn(*(x0s+args))
     global_x0s = [x for x in x0s]
@@ -113,21 +110,18 @@ def ncg(cost_fn, x0s, args=(), gtol=1e-5,
 
 
     def myfprime(*nw_x0s):
-        gx0s = TT.grad(out, global_x0s)
+        gx0s = TT.grad(out, global_x0s, keep_wrt_type=True)
         rval = theano.clone(gx0s, replace=dict(zip(global_x0s, nw_x0s)))
         #import ipdb; ipdb.set_trace()
         #rval = TT.grad(cost_fn(*nw_x0s), nw_x0s)
-        if not isinstance(rval, (list,tuple)):
-            return [rval]
-        else:
-            return [x for x in rval]
+        return [x for x in rval]
 
 
     n_elems = len(x0s)
 
     def fmin_cg_loop(old_fval, old_old_fval, *rest):
         xks  = rest[:n_elems]
-        gfks = rest[n_elems:n_elems*2]
+        gfks = rest[n_elems:n_elems * 2]
 
         maxs = [ abs(gfk).max(axis=range(gfk.ndim)) for gfk in gfks ]
         if len(maxs) == 1:
@@ -139,7 +133,7 @@ def ncg(cost_fn, x0s, args=(), gtol=1e-5,
 
         pks  = rest[n_elems*2:]
         #import ipdb; ipdb.set_trace()
-        deltak = sum( (gfk*gfk).sum() for gfk in gfks)
+        deltak = sum((gfk * gfk).sum() for gfk in gfks)
 
         old_fval_backup = old_fval
         old_old_fval_backup = old_old_fval
@@ -163,19 +157,24 @@ def ncg(cost_fn, x0s, args=(), gtol=1e-5,
                   zip(gfkp1s_tmp, nw_gfks)]
 
 
-        yks = [gfkp1 - gfk for gfkp1,gfk in zip(gfkp1s, gfks)]
-        beta_k = TT.maximum( zero, sum((x*y).sum() for x,y
-                                       in zip(yks, gfkp1s))/deltak)
+        yks = [gfkp1 - gfk for gfkp1, gfk in izip(gfkp1s, gfks)]
+        # Polak-Ribiere formula.
+        beta_k = TT.maximum(
+                zero,
+                sum((x * y).sum() for x, y in izip(yks, gfkp1s)) / deltak)
         pks  = [ ifelse(gnorm <= gtol, pk,
                                ifelse(TT.bitwise_or(TT.isnan(alpha_k),
                                                            TT.eq(alpha_k,
                                                                  zero)), pk, -gfkp1 +
                                              beta_k * pk)) for gfkp1,pk in zip(gfkp1s,pks) ]
-        gfks = [ ifelse(gnorm <= gtol, x,
-                ifelse(
-                    TT.bitwise_or(TT.isnan(alpha_k), TT.eq(alpha_k,zero)), x, y))
-                for (x,y) in zip(gfks, gfkp1s) ]
-
+        gfks = [ifelse(gnorm <= gtol,
+                       gfk,
+                       ifelse(
+                           TT.bitwise_or(TT.isnan(alpha_k),
+                                         TT.eq(alpha_k, zero)),
+                           gfk,
+                           gfkp1))
+                for (gfk, gfkp1) in izip(gfks, gfkp1s)]
 
         stop = lazy_or(gnorm <= gtol, TT.bitwise_or(TT.isnan(alpha_k),
                                                 TT.eq(alpha_k, zero)))# warnflag = 2
@@ -195,16 +194,14 @@ def ncg(cost_fn, x0s, args=(), gtol=1e-5,
     old_old_fval.name = 'old_old_fval'
     pks = [-gfk for gfk in gfks]
 
-    outs,_ = theano.scan( fmin_cg_loop,
-                         outputs_info = [old_fval,
-                                         old_old_fval]+xks+gfks+pks,
-                         n_steps = maxiter,
-                         name = 'fmin_cg',
-                         mode = theano.Mode(linker='cvm_nogc'),
-                         profile = profile)
+    outs, _ = theano.scan(fmin_cg_loop,
+                          outputs_info = [old_fval,
+                                          old_old_fval] + xks + gfks + pks,
+                          n_steps = maxiter,
+                          name = 'fmin_cg',
+                          mode = theano.Mode(linker='cvm_nogc'),
+                          profile = profile)
 
-    sol = [outs[0][-1]]+[ x[-1] for x in outs[2:2+n_elems]]
+    sol = [outs[0][-1]] + [x[-1] for x in outs[2:2+n_elems]]
     return sol
-
-
 

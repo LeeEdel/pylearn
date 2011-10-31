@@ -1,12 +1,15 @@
 """
- TODO : documment me
+TODO : documment me
 
 Pure Python version of CG ( basically the scipy implementation)
 """
+
+
 __docformat__ = 'restructedtext en'
 __authors__ = ( "Razvan Pascanu " )
 __copyright__ = "(c) 2010, Universite de Montreal"
 __contact__ = "Razvan Pascanu <r.pascanu@gmail>"
+
 
 import numpy, numpy as np
 import theano.tensor as TT, theano

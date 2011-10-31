@@ -1,6 +1,8 @@
+#!/usr/bin/env python
+
 import numpy, numpy as np
 import theano.tensor as TT, theano
-from rnn.gd_methods import ncg
+from pylearn2.optimization.ncg import ncg
 from python_cg import *
 import time
 import cPickle
