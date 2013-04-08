@@ -222,6 +222,212 @@ class VectorSpace(Space):
         if batch.ndim != 2:
             raise ValueError('VectorSpace batches must be 2D, got %d dimensions' % batch.ndim)
 
+class Conv3DSpace(Space):
+    """A space whose points are defined as sequences of (multi-channel) images."""
+    def __init__(self, shape, channels = None, num_channels = None,
+                 length = None, axes = None):
+        """
+        Initialize a Conv3DSpace.
+
+        Parameters
+        ----------
+        shape : sequence, length 2
+            The shape of a single image, i.e. (rows, cols).
+        num_channels: int     (synonym: channels)
+            Number of channels in the image, i.e. 3 if RGB.
+        length : int (optional)
+            Number of time steps in the sequence
+        axes: A tuple indicating the semantics of each axis.
+                'b' : this axis is the batch index of a minibatch.
+                'c' : this axis the channel index of a minibatch.
+                't' : this axis represents the length of the sequence (time)
+                <i>  : this is topological axis i (i.e., 0 for rows,
+                                  1 for cols)
+
+                For example, a PIL image has axes (0, 1, 'c') or (0, 1).
+                The pylearn2 image displaying functionality uses
+                    ('b', 0, 1, 'c') for batches and (0, 1, 'c') for images.
+                theano's conv2d operator uses ('b', 'c', 0, 1) images.
+        """
+
+        assert (channels is None) + (num_channels is None) == 1
+        if num_channels is None:
+            num_channels = channels
+
+        assert isinstance(num_channels, py_integer_types)
+        if not length is None:
+            assert isinstance(length, py_integer_types)
+            assert length > 0
+            self.length = length
+        else:
+            self.length = -1
+
+        if not hasattr(shape, '__len__') or len(shape) != 2:
+            raise ValueError("shape argument to Conv3DSpace must be length 2")
+        assert all(isinstance(elem, py_integer_types) for elem in shape)
+        assert all(elem > 0 for elem in shape)
+        assert isinstance(num_channels, py_integer_types)
+        assert num_channels > 0
+        self.shape = shape
+        self.num_channels = num_channels
+        if axes is None:
+            # Assume pylearn2's get_topological_view format, since this is how
+            # data is currently served up. If we make better iterators change
+            # default to ('b', 'c', 0, 1) for theano conv2d
+            axes = ('t','b', 0, 1, 'c')
+        assert len(axes) == 5
+        self.axes = axes
+
+    def __str__(self):
+        return "Conv3DSpace{shape=%s,num_channels=%d, length}" % (str(self.shape),
+                                                                  self.num_channels,
+                                                                  self.length)
+
+    def __eq__(self, other):
+        return type(self) == type(other) and \
+                self.shape == other.shape and \
+                self.length == other.length and \
+                self.num_channels == other.num_channels \
+                and self.axes == other.axes
+
+    @functools.wraps(Space.get_origin)
+    def get_origin(self):
+        dims = { 0: self.shape[0], 1: self.shape[1],
+                'c' : self.num_channels, 't': max(1, self.length) }
+        shape = [ dims[elem] for elem in self.axes if elem != 'b' ]
+        return np.zeros(shape)
+
+    @functools.wraps(Space.get_origin_batch)
+    def get_origin_batch(self, n):
+        if not isinstance(n, py_integer_types):
+            raise TypeError("Conv3DSpace.get_origin_batch expects an int, got " +
+                    str(n) + " of type " + str(type(n)))
+        assert n > 0
+        dims = { 'b' : n, 0: self.shape[0], 1: self.shape[1],
+                'c' : self.num_channels, 't' : max(1, self.length) }
+        shape = [ dims[elem] for elem in self.axes ]
+        return np.zeros(shape)
+
+    @functools.wraps(Space.make_theano_batch)
+    def make_theano_batch(self, name=None, dtype=None):
+        if dtype is None:
+            dtype = config.floatX
+
+        broadcastable = [False] * 5
+        broadcastable[self.axes.index('c')] = self.num_channels == 1
+        broadcastable = tuple(broadcastable)
+
+        return TensorType(dtype=dtype,
+                          broadcastable=broadcastable
+                         )(name=name)
+
+    @staticmethod
+    def convert(tensor, src_axes, dst_axes):
+        """
+            tensor: a 5 tensor representing a batch of images
+
+            src_axes: the axis semantics of tensor
+
+            Returns a view of tensor using the axis semantics defined
+            by dst_axes. (If src_axes matches dst_axes, returns
+            tensor itself)
+
+            Useful for transferring tensors between different
+            Conv3DSpaces.
+        """
+        src_axes = tuple(src_axes)
+        dst_axes = tuple(dst_axes)
+        assert len(src_axes) == 5
+        assert len(dst_axes) == 5
+
+        if src_axes == dst_axes:
+            return tensor
+
+        shuffle = [ src_axes.index(elem) for elem in dst_axes ]
+
+        return tensor.dimshuffle(*shuffle)
+
+    @staticmethod
+    def convert_numpy(tensor, src_axes, dst_axes):
+        """
+            tensor: a 5 tensor representing a batch of images
+
+            src_axes: the axis semantics of tensor
+
+            Returns a view of tensor using the axis semantics defined
+            by dst_axes. (If src_axes matches dst_axes, returns
+            tensor itself)
+
+            Useful for transferring tensors between different
+            Conv3DSpaces.
+        """
+        src_axes = tuple(src_axes)
+        dst_axes = tuple(dst_axes)
+        assert len(src_axes) == 5
+        assert len(dst_axes) == 5
+
+        if src_axes == dst_axes:
+            return tensor
+
+        shuffle = [ src_axes.index(elem) for elem in dst_axes ]
+
+        return tensor.transpose(*shuffle)
+
+    @functools.wraps(Space.get_total_dimension)
+    def get_total_dimension(self):
+        return self.shape[0] * self.shape[1] * self.num_channels
+
+    @functools.wraps(Space.validate)
+    def validate(self, batch):
+        if not isinstance(batch, theano.gof.Variable):
+            raise TypeError("Conv3DSpace batches must be theano Variables, got "+str(type(batch)))
+        if not isinstance(batch.type, (theano.tensor.TensorType,CudaNdarrayType)):
+            raise TypeError()
+        if batch.ndim != 5:
+            raise ValueError()
+        for val in get_debug_values(batch):
+            d = self.axes.index('c')
+            actual_channels = val.shape[d]
+            if actual_channels != self.num_channels:
+                raise ValueError("Expected axis "+str(d)+" to be number of channels ("+str(self.num_channels)+\
+                        ") but it is "+str(actual_channels))
+            assert val.shape[self.axes.index('c')] == self.num_channels
+            for coord in [0,1]:
+                d = self.axes.index(coord)
+                actual_shape = val.shape[d]
+                expected_shape = self.shape[coord]
+                if actual_shape != expected_shape:
+                    raise ValueError("Conv2DSpace with shape "+str(self.shape) + \
+                            " and axes " + str(self.axes) + " expected dimension " + \
+                            str(d) + " of a batch (" + str(batch)+") to have length " + str(expected_shape) + \
+                            " but it has "+str(actual_shape))
+            if self.length > 0:
+                d = self.axes.index('t')
+                actual_sequence_len = val.shape[d]
+                if actual_sequence_len != self.length:
+                    raise ValueError(('Expected axis ' + str(d) + ' to be '
+                                     'sequence length (' + str(self.length) +
+                                     ') but it is ' +
+                                      str(actual_sequence_len)))
+
+
+    @functools.wraps(Space._format_as)
+    def _format_as(self, batch, space):
+        self.validate(batch)
+        if isinstance(space, SequenceSpace):
+            if self.axes[0] != 't' or self.axes[1] != 'b':
+                # We need to ensure that the batch index goes on the first axis before the reshape
+                new_axes = ['t', 'b'] + [axis for axis in self.axes
+                                         if ((axis != 'b') and (axis != 't'))]
+                batch = batch.dimshuffle(*[self.axes.index(axis) for axis in new_axes])
+            return batch.reshape((batch.shape[0], batch.shape[1], self.get_total_dimension()))
+        if isinstance(space, Conv3DSpace):
+            return Conv3DSpace.convert(batch, self.axes, space.axes)
+        if isinstance(space, Conv2DSpace):
+            # TODO : fold time into channels
+            raise NotImplementedError
+        raise NotImplementedError("Conv3DSPace doesn't know how to format as "+str(type(space)))
+
 class Conv2DSpace(Space):
     """A space whose points are defined as (multi-channel) images."""
     def __init__(self, shape, channels = None, num_channels = None, axes = None):
