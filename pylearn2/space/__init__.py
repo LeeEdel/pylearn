@@ -672,8 +672,8 @@ class DenseIndexSequence(Space):
             raise ValueError('DenseSequence batches must be 3D, got %d dimensions' % batch.ndim)
 
 class DenseSequence(Space):
-    """A space whose points are defined as fixed-width sequences. In its
-    batch form it assumes all sequences have same length."""
+    """A space whose points are defined as fixed-width sequences (with no
+    topology). In its batch form it assumes all sequences have same length."""
     def __init__(self, dim, length=None):
         """
         Initialize a DenseSequence.
