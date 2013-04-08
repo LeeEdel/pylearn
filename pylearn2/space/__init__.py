@@ -406,6 +406,65 @@ class Conv2DSpace(Space):
         raise NotImplementedError("Conv2DSPace doesn't know how to format as "+str(type(space)))
 
 
+class DenseSequence(Space):
+    """A space whose points are defined as fixed-width sequences. In its
+    batch form it assumes all sequences have same length."""
+    def __init__(self, dim, length=None):
+        """
+        Initialize a DenseSequence.
+
+        Parameters
+        ----------
+        dim : int
+            Dimensionality of a single step
+        length: int
+            If provided (i.e. not None), the length of the sequence(s).
+        """
+        self.dim = dim
+        self.length = None
+
+    @functools.wraps(Space.get_origin)
+    def get_origin(self):
+        if length:
+            return np.zeros((self.length, self.dim))
+        else:
+            return np.zeros((1, self.dim))
+
+    @functools.wraps(Space.get_origin_batch)
+    def get_origin_batch(self, n):
+        if length:
+            return np.zeros((self.length, n, self.dim))
+        else:
+            return np.zeros((1, n, self.dim))
+
+    @functools.wraps(Space.make_theano_batch)
+    def make_theano_batch(self, name=None, dtype=None):
+        if dtype is None:
+            dtype = config.floatX
+
+        # Add shape information via infer_shape !?
+        return T.tensor3(name=name, dtype=dtype)
+
+    @functools.wraps(Space.get_total_dimension)
+    def get_total_dimension(self):
+        return self.dim
+
+    @functools.wraps(Space._format_as)
+    def _format_as(self, batch, space):
+        raise NotImplementedError("DenseSequence doesn't know how to format as "+str(type(space)))
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.dim == other.dim and \
+                self.length == other.length
+
+    def validate(self, batch):
+        if not isinstance(batch, theano.gof.Variable):
+            raise TypeError("DenseSequence batch should be a theano Variable, got "+str(type(batch)))
+        if batch.ndim != 3:
+            raise ValueError('DenseSequence batches must be 3D, got %d dimensions' % batch.ndim)
+
+
+
 class CompositeSpace(Space):
     """A Space whose points are tuples of points in other spaces """
     def __init__(self, components):
