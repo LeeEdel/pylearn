@@ -716,6 +716,7 @@ class DenseSequence(Space):
 
     @functools.wraps(Space._format_as)
     def _format_as(self, batch, space):
+        # DenseIndexSequence !?
         raise NotImplementedError("DenseSequence doesn't know how to format as "+str(type(space)))
 
     def __eq__(self, other):
