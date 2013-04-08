@@ -27,7 +27,7 @@ to allocate parameters like hidden unit bias terms in
 the right space.
 
 """
-__authors__ = "Ian Goodfellow"
+__authors__ = "Ian Goodfellow, Razvan Pascanu"
 __copyright__ = "Copyright 2010-2012, Universite de Montreal"
 __credits__ = ["Ian Goodfellow"]
 __license__ = "3-clause BSD"
