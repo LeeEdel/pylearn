@@ -729,8 +729,6 @@ class DenseSequence(Space):
         if batch.ndim != 3:
             raise ValueError('DenseSequence batches must be 3D, got %d dimensions' % batch.ndim)
 
-
-
 class CompositeSpace(Space):
     """A Space whose points are tuples of points in other spaces """
     def __init__(self, components):
