@@ -244,10 +244,6 @@ class Conv3DSpace(Space):
                 <i>  : this is topological axis i (i.e., 0 for rows,
                                   1 for cols)
 
-                For example, a PIL image has axes (0, 1, 'c') or (0, 1).
-                The pylearn2 image displaying functionality uses
-                    ('b', 0, 1, 'c') for batches and (0, 1, 'c') for images.
-                theano's conv2d operator uses ('b', 'c', 0, 1) images.
         """
 
         assert (channels is None) + (num_channels is None) == 1
