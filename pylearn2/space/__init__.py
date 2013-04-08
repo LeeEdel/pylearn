@@ -421,7 +421,21 @@ class Conv3DSpace(Space):
             return Conv3DSpace.convert(batch, self.axes, space.axes)
         if isinstance(space, Conv2DSpace):
             # TODO : fold time into channels
-            raise NotImplementedError
+            # Ensure time and channels are adjacent
+            tidx = self.axes.index('t')
+            cidx = self.axes.index('c')
+            assert cidx != 0, 'Corner case not supported yet'
+            if tidx + 1 != cidx:
+                # dimshuffle to re-order axes
+                order = [0,1,2,3,4]
+                order[cidx-1] = tidx
+                order[tidx] = cidx-1
+                batch = batch,dimshuffle(*order)
+
+            shapes = [batch.shape[k] for k in xrange(cidx-1)]
+            shapes.append(batch.shape[cidx-1] * batch,shape[cidx])
+            shapes += [batch,shape[k] for k in xrange(cidx+1, 5)]
+            return batch,reshape(shapes)
         raise NotImplementedError("Conv3DSPace doesn't know how to format as "+str(type(space)))
 
 class Conv2DSpace(Space):
